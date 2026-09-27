@@ -1,0 +1,60 @@
+# ============================================================================
+# docker-compose.yml —— 一条命令把整套评测跑起来
+# ============================================================================
+# 好处：不用再手工敲一长串 docker run，直接 `docker compose up` 就行。
+# 注意：新版 compose 已经不需要写 version: "3" 那一行，写了反而有一条黄色警告。
+#
+# ★★ 项目三跟项目二最大的不同（面试会问，一定要能说清）★★
+#   项目二是**服务**：有网页、有 HTTP 接口，要一直开着等人访问
+#       → 所以要写 ports（端口映射）、要写 healthcheck（定期探活）
+#   项目三是**命令行工具**：跑完 55 条、出了报告，任务就结束了
+#       → 所以**不写 ports、不写 healthcheck**，跑完容器自己退出
+#   把服务型程序和批处理型程序按同一种方式打包，是很常见的外行错误。
+# ============================================================================
+
+services:                       # services = 服务列表（这里只有一个）
+
+  eval:                         # ---------- 唯一的服务：评测任务 ----------
+    build: .                    # build = 用当前目录的 Dockerfile 现场构建镜像（. 就是当前目录）
+    image: eval-system:v1       # 给构建出来的镜像起个名字+版本号，方便以后 docker images 里认出来
+    container_name: eval-run    # 给容器起个固定名字（不写的话 Docker 会随机起名）
+
+    env_file:                   # env_file = 从这个文件读环境变量注入容器
+      - .env                    # ★ .env 里有 DEEPSEEK_API_KEY 等密钥；
+                                #   用这种方式传密钥，而不是写死在代码/镜像里 —— 所以这个镜像可以放心分享
+
+    volumes:                    # volumes = 目录挂载（把本机文件夹"接"进容器）
+      - ./:/app                 # ★ 把整个项目目录挂到容器 /app：跑出来的 eval_report.md、eval_chart.png
+                                #   会直接写回你本机的目录里，容器一删东西还在
+                                #   ★ 面试可能问：挂载会盖掉镜像里 /app 的内容。放心 —— 依赖装在
+                                #   site-packages，不在 /app，不受影响
+
+    command: python eval_cli.py all --limit 0
+                                # command = 覆盖 Dockerfile 里那条 CMD
+                                #   all      = 跑评测 + 出报告（run 只跑、report 只出报告）
+                                #   --limit 0 = 跑全部 55 条；不写 0 的话默认只跑 5 条（先试水，免得一次烧太多钱）
+
+    restart: "no"               # ★★ 这一行跟项目二**故意不一样**，不是写漏了 ★★
+                                # 项目二写的是 unless-stopped（服务挂了自动爬起来）。
+                                # 项目三**绝对不能自动重启**：这是个一次性任务，
+                                # 如果设成 unless-stopped，容器跑完退出 → 自动重启 → 又跑一遍 → 又退出……
+                                # 结果是**一遍一遍地调接口烧钱**，而且你毫不知情。
+                                # 批处理型容器的正确姿势就是 restart: "no"（跑完就结束）。
+
+# ---------- 常用命令（背下来，面试会问）----------
+# 构建镜像：            docker compose build
+# 跑起来（前台看日志）：docker compose up
+# 跑起来（后台）：      docker compose up -d
+# 看日志：              docker compose logs -f
+# 跑完看结果：          本机的 eval_report.md 和 eval_chart.png（因为挂了 ./:/app）
+#
+# ---------- 不想用 compose 的话，等价的两条命令 ----------
+#   docker build -t eval-system:v1 .
+#   docker run --rm --env-file .env -v "%cd%:/app" eval-system:v1 python eval_cli.py all --limit 0
+#   （--env-file .env = 密钥从外面传进去，镜像里不含任何密钥）
+#
+# ---------- ★ 诚实说明（别在外面吹"Docker 跑通了"）----------
+#   这两个文件是**静态写好的**，写法逐条对照过项目二那份已经跑通的 compose。
+#   但本机的 Docker 引擎没起来（WSL2 没装），所以**这个 compose 文件没有真机跑过**。
+#   面试被问到就照实说："Dockerfile 和 compose 都写好了，本机环境没起得来，还没做真机验证。"
+#   说"跑通了"然后被要求现场演示，是最尴尬的翻车方式。
