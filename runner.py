@@ -35,9 +35,11 @@ RESULT_FIELDS = [
     "q",            # 问题原文
     "reference",    # 参考答案（report 要拿它做对比）
     "a",            # 模型回答
-    "ok",           # ★判分结果：True/False（metrics 算准确率就靠它）
+    "ok",           # ★判分结果：True/False（metrics 算准确率就靠它）★双裁判的"严格"口径=全票通过
+    "ok_any",       # 对照口径（宽松）：任一位裁判说过就算过
+    "votes",        # ★每位裁判各投的一票（面试时能亮出"两个裁判分别怎么判的"）
     "reason",       # 判定理由（为什么过/为什么不过）
-    "how",          # 判分方式：rule / llm / rule+llm
+    "how",          # 判分方式：rule / llm / rule+llm / 双裁判
     "t",            # ★耗时秒数（metrics 算延迟靠它）
     "tokens",       # ★token 数（metrics 算成本靠它）
     "ts",           # 时间戳
@@ -151,7 +153,24 @@ def run_all(models=None, limit=None, use_llm=False, resume=True):               
                 r = {"text": f"[调用失败] {type(e).__name__}: {e}", "t": round(time.time() - t0, 3), "tokens": 0}  # 把错误当回答记下来
             answer = r["text"]                                                  # 取出回答
 
-            ok, reason, how = judge(item, answer, use_llm=use_llm, judge_model=m)  # ★判分（用被测模型之外的？这里就用它自己，便于对比）
+            # ★★ 2026-10-10 改成"双裁判"（原来写的是 judge_model=m，即被测模型自己判自己）
+            #   为什么原来那样不行：模型有"护短"倾向 —— 看自己写的答案更容易觉得没问题，
+            #   分数会系统性偏高（学名"自评偏差 / self-preference bias"）。
+            #   为什么不只改成"交叉判分"（deepseek 的卷子给智谱判、反之）：那样每个回答只面对一个裁判，
+            #   万一甲裁判比乙裁判宽松，就会变成"谁碰巧被宽松裁判判到谁分高"，换个方向不公平。
+            #   现在的做法：**每个回答都让除它自己以外的所有模型各判一次**，裁判组合完全一样，才真正可比。
+            #   主口径取"严格"：所有裁判都说合格才算过（宁严勿松，不给自己放水）。
+            judges = list(models) or [m]                                            # ★裁判名单=全部模型（含它自己）——这样每个回答面对的裁判组合完全一样
+                                                                                    #   若改成"除自己以外的模型"，2 个模型时就退化成"交叉判分"：
+                                                                                    #   甲答的只被乙判、乙答的只被甲判，甲严乙宽就变成"碰运气"，不公平。
+            votes = []                                                              # 每个裁判投一票，记在这里
+            for jm in judges:                                                       # 逐个裁判
+                v_ok, v_reason, v_how = judge(item, answer, use_llm=use_llm, judge_model=jm)  # 这位裁判的判决
+                votes.append({"judge": jm.name, "ok": v_ok, "reason": v_reason})     # 记下这一票
+            ok = all(v["ok"] for v in votes)                                        # ★主口径=严格：全票通过才算过
+            ok_any = any(v["ok"] for v in votes)                                    # 对照口径=宽松：有一票说过就算过
+            how = "双裁判"                                                           # 判分方式标记
+            reason = " ｜ ".join(f"{v['judge']}：{'过' if v['ok'] else '不过'}，{v['reason'][:20]}" for v in votes)  # 两票的理由都写进去
             row = {                                                             # ★组装完整一行结果
                 "id": i,                                                        # 题目编号
                 "model": m.name,                                                # ★哪个模型
@@ -161,8 +180,10 @@ def run_all(models=None, limit=None, use_llm=False, resume=True):               
                 "q": q,                                                         # 问题
                 "reference": item["reference_answer"],                          # 参考答案
                 "a": answer,                                                    # 回答
-                "ok": ok,                                                       # ★判分结果
-                "reason": reason,                                               # 理由
+                "ok": ok,                                                       # ★判分结果（严格口径：全票通过）
+                "ok_any": ok_any,                                               # ★对照口径（宽松：有一票说过就算过）
+                "votes": votes,                                                 # ★每位裁判各投的一票（谁能给面试官看"两个裁判怎么判的"）
+                "reason": reason,                                               # 理由（两位裁判的理由都拼在这里）
                 "how": how,                                                     # 判分方式
                 "t": r["t"],                                                    # ★耗时
                 "tokens": r["tokens"],                                          # ★token

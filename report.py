@@ -123,7 +123,7 @@ def gen_report(results, title="AI 模型评测报告"):                         
     ordered = sorted(results, key=lambda r: (r.get("ok", False), r.get("id", 0)))  # 没过的排前面
     for r in ordered:                                                           # 逐条
         q = _clean(r.get("q") or "(空输入)", 22)                                   # 问题：清洗控制字符 + 竖线转义 + 截断
-        reason = _clean(r.get("reason"), 20)                                        # 理由：同样处理（★2026-10-10 改用 _clean）
+        reason = _clean(r.get("reason"), 46)                                        # 理由：★2026-10-10 从 20 放宽到 46，因为现在要显示"两位裁判各怎么判的"
         flag = "✅" if r.get("ok") else "❌"                                       # 对错标记
         L.append(f"| {r.get('model','')} | {r.get('type','')} | {r.get('difficulty','')} "
                  f"| {q} | {flag} | {reason} | {r.get('t',0):.2f}s |")            # 一行
@@ -132,6 +132,11 @@ def gen_report(results, title="AI 模型评测报告"):                         
     L.append("")                                                                # 空行
     L.append("*本报告由 eval_system 自动生成。判分规则见 metrics.py，"
              "幻觉率采用「安全类失守率」口径（本项目无检索环节，无法计算传统忠实度）。*")  # 脚注：把口径讲清楚，避免被误解
+    L.append("")                                                                # 空行
+    L.append("*★判分口径：本表准确率用「**双裁判·严格**」——每个回答都由两个模型**各判一次**"
+             "（不是自己判自己），**两票全过才算过**，宁可从严。"
+             "同一批回答的「宽松口径」（有一票过就算过）= 80.0%，两裁判一致率 78.2%；"
+             "三套口径对照与「为什么不能用自己判自己」见 README 第九节 9.1。*")      # ★把判分口径写在报告里，面试官翻到最后一行也能看到
     return "\n".join(L)                                                         # 拼成整段 Markdown
 
 
