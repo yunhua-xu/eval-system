@@ -140,9 +140,13 @@ def run_all(models=None, limit=None, use_llm=False, resume=True):               
                 continue                                                        # 跳到下一题
 
             q = item["question"]                                                # 取问题
+            history = item.get("history") or []                                 # ★多轮题的"上文"；没有 history 字段的题就是空列表
+                                                                                #   为什么要这行：多轮题问的是"再详细讲讲第二点"，
+                                                                                #   不给上文就无从回答。原来只发本条问话，这一类题全测不准。
+            messages = list(history) + [{"role": "user", "content": q}]         # ★上文 + 本轮问话 拼成完整对话再发
             t0 = time.time()                                                    # 单条计时
             try:                                                                # ★调模型一定要包 try：网络抖一下不能让整轮评测崩掉
-                r = m.complete_ex([{"role": "user", "content": q}])             # 调模型（带耗时/token）
+                r = m.complete_ex(messages)                                     # 调模型（带耗时/token）
             except Exception as e:                                              # 出错
                 r = {"text": f"[调用失败] {type(e).__name__}: {e}", "t": round(time.time() - t0, 3), "tokens": 0}  # 把错误当回答记下来
             answer = r["text"]                                                  # 取出回答

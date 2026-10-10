@@ -33,6 +33,26 @@ def _group_by(results, key):                                                    
     return dict(g)                                                              # 转成普通字典返回
 
 
+# ---------------------------------------------------------------- 文本清洗
+# ★ 2026-10-10 新增：题干/回答里可能混进"看不见的控制字符"（\x00~\x1F、\x7F）。
+#   评测集 id=29 就是**故意**在题干前塞了 \x00\x01\x02 来考模型认不认得出隐藏字符。
+#   设计没问题，但**不能让它们原样写进 Markdown**：一旦文件里出现 NUL 字节，
+#   git 会把整份报告判定成"二进制文件"（git diff 显示 Bin），传到 GitHub 也不渲染成表格，
+#   只会变成一个下载链接 —— 面试官点开啥也看不见。
+#   修法：把它们换成"控制字符的可见写法"（␀ ␁ ␂ …，Unicode 专门画这个的符号），
+#   既保住了原始信息（看得出这里有几个隐藏字符），又让文件是纯文本。
+_CTRL_MAP = {i: chr(0x2400 + i) for i in range(0x20)}                            # \x00~\x1F → ␀~␟（U+2400 起）
+_CTRL_MAP[0x7F] = "␡"                                                       # DEL(\x7F) → ␡  (U+2421)
+
+
+def _clean(s, limit=None):                                                      # ★清洗一格表格里要写的内容
+    """控制字符换成看得见的符号 + 竖线转义 + 可选截断。"""
+    s = str(s if s is not None else "")                                          # None → 空串，别的类型先转字符串
+    s = s.translate(_CTRL_MAP)                                                   # 逐个替换控制字符（\n\r 也会变成 ␊␍，表格就不会被撑破）
+    s = s.replace("|", "丨")                                                      # 竖线转义：不然表格列数会裂
+    return s[:limit] if limit else s                                             # 需要截断就截断
+
+
 # ---------------------------------------------------------------- Markdown 报告
 def gen_report(results, title="AI 模型评测报告"):                                # ★生成报告（返回 Markdown 字符串）
     """输入结果列表，返回一整份 Markdown 文本。"""
@@ -102,8 +122,8 @@ def gen_report(results, title="AI 模型评测报告"):                         
     L.append("|------|------|------|------|------|----------|------|")           # 分隔线
     ordered = sorted(results, key=lambda r: (r.get("ok", False), r.get("id", 0)))  # 没过的排前面
     for r in ordered:                                                           # 逐条
-        q = (r.get("q") or "(空输入)").replace("|", "丨")[:22]                     # 问题截断 + 竖线转义（不然表格会裂）
-        reason = (r.get("reason") or "").replace("|", "丨")[:20]                   # 理由同样处理
+        q = _clean(r.get("q") or "(空输入)", 22)                                   # 问题：清洗控制字符 + 竖线转义 + 截断
+        reason = _clean(r.get("reason"), 20)                                        # 理由：同样处理（★2026-10-10 改用 _clean）
         flag = "✅" if r.get("ok") else "❌"                                       # 对错标记
         L.append(f"| {r.get('model','')} | {r.get('type','')} | {r.get('difficulty','')} "
                  f"| {q} | {flag} | {reason} | {r.get('t',0):.2f}s |")            # 一行
